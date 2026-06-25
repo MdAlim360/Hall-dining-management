@@ -3640,11 +3640,38 @@ function wzNext(fromStep) {
       if (document.getElementById('toggleSokal').classList.contains('selected')) meals.push(`☀️ সকাল ৳${rates.sokal}`);
       if (document.getElementById('toggleDopore').classList.contains('selected')) meals.push(`🌤️ দুপুর ৳${rates.dopore}`);
       if (document.getElementById('toggleRatre').classList.contains('selected')) meals.push(`🌙 রাত ৳${rates.ratre}`);
-      const days = daysBetween(startDate, diningDates.end) + 1;
-      const mealCost = (document.getElementById('toggleSokal').classList.contains('selected')?rates.sokal:0)
+      const totalDays = daysBetween(startDate, diningDates.end) + 1;
+
+      // পূর্ণ দৈনিক রেট (plan অনুযায়ী — আগামীকাল থেকে)
+      const fullMealCost = (document.getElementById('toggleSokal').classList.contains('selected')?rates.sokal:0)
         + (document.getElementById('toggleDopore').classList.contains('selected')?rates.dopore:0)
         + (document.getElementById('toggleRatre').classList.contains('selected')?rates.ratre:0);
-      const daily = mealCost + rates.cooking;
+      const fullDaily = fullMealCost + rates.cooking;
+
+      // আজকের জন্য আলাদা হিসাব — cutoff-disabled মিল বাদ দিয়ে
+      // _cutoffMealOffPending এ যে meals আছে সেগুলো আজকে কাটবে না
+      const todayOffMeals = (window._cutoffMealOffPending && window._cutoffMealOffPending.date === startDate)
+        ? window._cutoffMealOffPending.meals : [];
+      let todayMealCost = 0;
+      if (document.getElementById('toggleSokal').classList.contains('selected') && !todayOffMeals.includes('sokal')) todayMealCost += rates.sokal;
+      if (document.getElementById('toggleDopore').classList.contains('selected') && !todayOffMeals.includes('dopore')) todayMealCost += rates.dopore;
+      if (document.getElementById('toggleRatre').classList.contains('selected') && !todayOffMeals.includes('ratre')) todayMealCost += rates.ratre;
+      const todayDaily = todayMealCost > 0 ? todayMealCost + rates.cooking : 0;
+
+      const isToday = startDate === today;
+      const remainingDays = isToday ? totalDays - 1 : totalDays; // আজকে বাদে বাকি দিন
+      const estimatedTotal = (isToday ? todayDaily : 0) + (fullDaily * remainingDays);
+
+      let summaryLine = '';
+      if (isToday && todayOffMeals.length > 0) {
+        // আজকে reduced rate, পরের দিন full rate
+        const nameMap = { dopore:'দুপুর', ratre:'রাত', sokal:'সকাল' };
+        const offNames = todayOffMeals.map(m => nameMap[m]).join('+');
+        summaryLine = `আজকে (${offNames} বাদে): ৳${todayDaily} + বাকি ${remainingDays} দিন × ৳${fullDaily} = <strong>৳${estimatedTotal}</strong>`;
+      } else {
+        summaryLine = `প্রতিদিন ৳${fullDaily} × ${totalDays} দিন = <strong>৳${fullDaily*totalDays}</strong>`;
+      }
+
       document.getElementById('wz-summary').innerHTML = `
         <div style="font-weight:700;margin-bottom:8px;color:var(--primary-dark);">📋 তথ্য সারাংশ</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:13px;">
@@ -3656,7 +3683,7 @@ function wzNext(fromStep) {
           <div>📅 শুরু: ${formatDate(startDate)}</div>
           <div>📅 শেষ: ${formatDate(diningDates.end)}</div>
           <div style="grid-column:span 2;background:var(--primary);color:white;border-radius:8px;padding:8px;text-align:center;margin-top:4px;">
-            প্রতিদিন ৳${daily} × ${days} দিন = <strong>৳${daily*days}</strong>
+            ${summaryLine}
           </div>
         </div>`;
       wzGoto(3);
@@ -4067,6 +4094,7 @@ function calcDailyRate() {
 
   const diningDates = getData('adminDiningDates', null);
   const selDate = document.getElementById('onStartDate') ? document.getElementById('onStartDate').value : '';
+  const today = todayStr();
   let cycleDays = CYCLE_DAYS;
   let cycleLabel = '১৫ দিনে';
   let hintText = '';
@@ -4082,9 +4110,26 @@ function calcDailyRate() {
     cycleLabel = `${cycleDays} দিনে`;
   }
 
+  // আজকে start হলে এবং কিছু meal cutoff-disabled থাকলে আজকের আলাদা cost
+  const todayOffMeals = (selDate === today && window._cutoffMealOffPending && window._cutoffMealOffPending.date === today)
+    ? window._cutoffMealOffPending.meals : [];
+  let cycleTotal = daily * cycleDays;
+  let cycleInfo = `${cycleLabel}: <strong>৳${cycleTotal}</strong>`;
+  if (todayOffMeals.length > 0 && cycleDays > 0) {
+    let todayMC = 0;
+    if (document.getElementById('toggleSokal').classList.contains('selected') && !todayOffMeals.includes('sokal')) todayMC += rates.sokal;
+    if (document.getElementById('toggleDopore').classList.contains('selected') && !todayOffMeals.includes('dopore')) todayMC += rates.dopore;
+    if (document.getElementById('toggleRatre').classList.contains('selected') && !todayOffMeals.includes('ratre')) todayMC += rates.ratre;
+    const todayTotal = todayMC > 0 ? todayMC + rates.cooking : 0;
+    cycleTotal = todayTotal + daily * (cycleDays - 1);
+    const nameMap = { dopore:'দুপুর', ratre:'রাত', sokal:'সকাল' };
+    const offNames = todayOffMeals.map(m => nameMap[m]).join('+');
+    cycleInfo = `আজকে (${offNames} বাদে) ৳${todayTotal} + বাকি ${cycleDays-1} দিন × ৳${daily} = <strong>৳${cycleTotal}</strong>`;
+  }
+
   const el = document.getElementById('dailyRateCalc');
   el.innerHTML = total > 0
-    ? `প্রতিদিন: ৳${total} + কুকিং ৳${rates.cooking} = <strong>৳${daily}</strong> | ${cycleLabel}: <strong>৳${daily*cycleDays}</strong>`
+    ? `প্রতিদিন: ৳${total} + কুকিং ৳${rates.cooking} = <strong>৳${daily}</strong> | ${cycleInfo}`
     : 'মিল নির্বাচন করুন';
 }
 
