@@ -2386,7 +2386,7 @@ input:checked + .slider:before { transform: translateX(20px); }
       <div class="tab-content" id="admin-milrates">
         <div class="section-title">💵 মিল রেট নির্ধারণ</div>
         <div class="card">
-          <p class="text-muted mb-3" style="font-size:13px;">৩ বেলা খেলে: সকাল+দুপুর+রাত = ৮৫টাকা/দিন + কুকিং চার্জ ৫টাকা = ৯০টাকা/দিন (১৫ দিনে ১৩৫০টাকা)। সকাল ছাড়া দুপুর/রাত একা নেওয়া যায় না — দুপুর বা রাত চালু করলে সকাল অটো চালু হয়ে যাবে। তাই: শুধু দুপুর (সকাল+দুপুর) = ৫৫+৫=৬০টাকা/দিন, শুধু রাত (সকাল+রাত) = ৪৫+৫=৫০টাকা/দিন — এই হিসাব মেলাতে নিচে সকাল=১৫, দুপুর=৪০, রাত=৩০ দিন।</p>
+          <p class="text-muted mb-3" style="font-size:13px;">☀️ <strong>সকাল বাধ্যতামূলক</strong> — সব প্ল্যানে সকাল automatically include। শুধু দুপুর নিলে: সকাল+দুপুর রেট কাটবে। শুধু রাত নিলে: সকাল+রাত রেট কাটবে। তিন বেলা: সকাল+দুপুর+রাত। সকালের কাটঅফ পার হলেও সেদিনের সকালের রেট বিল থেকে কাটা হবে।</p>
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">সকালের রেট (৳)</label>
@@ -2719,10 +2719,10 @@ input:checked + .slider:before { transform: translateX(20px); }
       <div class="form-group" id="mealSelectGroup">
         <label class="form-label">মিল নির্বাচন করুন *</label>
         <div id="mealRateInfo" style="background:var(--bg);border-radius:8px;padding:12px;margin-bottom:10px;font-size:13px;"></div>
-        <div id="mealCutoffWarning">⏰ <strong>আজকের সব মিল শেষ।</strong> আগামীকাল থেকে মিল চালু হবে।</div>
+        <div id="mealCutoffWarning">⏰ <strong>আজকের দুপুর ও রাতের সময় শেষ।</strong> ☀️ সকাল বাধ্যতামূলক — সকালের রেট কাটবে। দুপুর/রাত আগামীকাল থেকে চালু হবে।</div>
         <div class="meal-toggle-row">
-          <label class="meal-toggle selected" id="toggleSokal">
-            <input type="checkbox" id="selSokal" checked onchange="onMealToggle(this,'sokal')"> ☀️ সকাল
+          <label class="meal-toggle selected" id="toggleSokal" style="opacity:0.82;cursor:not-allowed;" title="সকাল বাধ্যতামূলক">
+            <input type="checkbox" id="selSokal" checked onchange="onMealToggle(this,'sokal')"> ☀️ সকাল 🔒
           </label>
           <label class="meal-toggle" id="toggleDopore">
             <input type="checkbox" id="selDopore" onchange="onMealToggle(this,'dopore')"> 🌤️ দুপুর
@@ -3613,20 +3613,8 @@ function wzNext(fromStep) {
       return showToast('সব তারকা (*) চিহ্নিত তথ্য পূরণ করুন', 'error');
     if (password.length < 4) return showToast('পাসওয়ার্ড কমপক্ষে ৪ অক্ষর হতে হবে', 'error');
 
-  // আজকের সব মিলের কাটঅফ পার হলে আজকের তারিখে ডাইনিং চালু করা যাবে না
-  const _onToday = todayStr();
-  const _onStartDateEl = document.getElementById('onStartDate');
-  const _onStartDate = _onStartDateEl ? _onStartDateEl.value : '';
-  if (_onStartDate === _onToday && ['sokal','dopore','ratre'].every(m => isMealCutoffPassedNow(m))) {
-    const _onTimes = getMealCutoffTimes();
-    return showToast(
-      '⏰ আজকের সব মিলের কাটঅফ পার হয়ে গেছে (সকাল ' + timeToAmPmLabel(_onTimes.sokal) +
-      ', দুপুর ' + timeToAmPmLabel(_onTimes.dopore) +
-      ', রাত ' + timeToAmPmLabel(_onTimes.ratre) +
-      ') — আজকের তারিখে ডাইনিং চালু করা যাবে না। আগামীকাল বা পরের তারিখ বেছে নিন।',
-      'error'
-    );
-  }
+  // সকাল mandatory তাই সব cutoff পার হলেও আজকের date এ enrollment করা যাবে
+  // সকালের rate কাটবে, অন্য মিল আগামীকাল থেকে চালু হবে
     wzGoto(2);
   } else if (fromStep === 2) {
     const diningDates = getData('adminDiningDates', null);
@@ -3638,16 +3626,11 @@ function wzNext(fromStep) {
     // ── time-based cutoff check ──────────────────────
     const today = todayStr();
     const disabledMeals = (startDate === today) ? getTimeCutoffDisabledMeals() : [];
-    // আজকের জন্য সব মিল disabled হলে proceed করা যাবে না
-    if (startDate === today && disabledMeals.length === 3) {
-      return showToast('আজকের সব মিলের কাটঅফ পার হয়ে গেছে — আগামীকাল বা পরের তারিখ নির্বাচন করুন', 'error');
-    }
-    // কমপক্ষে একটি enabled মিল selected থাকতে হবে
-    const enabledSelected = ['sokal','dopore','ratre'].filter(m => !disabledMeals.includes(m))
-      .some(m => document.getElementById('toggle' + m.charAt(0).toUpperCase() + m.slice(1)).classList.contains('selected'));
-    if (!enabledSelected) {
-      return showToast('কমপক্ষে একটি মিল নির্বাচন করুন', 'error');
-    }
+    // সকাল mandatory তাই সব cutoff পার হলেও enrollment করা যাবে (সকাল rate কাটবে)
+    // শুধু যদি সব মিলের cutoff পার হয়, তাহলেও আজকের date select করা যাবে —
+    // সকালের rate কাটবে এবং dopore/ratre আগামীকাল থেকে চালু হবে।
+    // enabledSelected সবসময় true কারণ সকাল সবসময় selected
+    const enabledSelected = true; // সকাল mandatory হওয়ায় সবসময় কমপক্ষে একটি মিল আছে
 
     // disabled মিলগুলো plan-এ রাখবেন কিনা confirm নেওয়া
     const proceedToSummary = () => {
@@ -3680,18 +3663,26 @@ function wzNext(fromStep) {
     };
 
     if (disabledMeals.length > 0) {
-      // disabled মিলের নাম বাংলায়
+      // সকাল mandatory — disabledMeals থেকে sokal বাদ, শুধু dopore/ratre off হবে
+      const offableMeals = disabledMeals.filter(m => m !== 'sokal');
+      // disabled মিলের নাম বাংলায় (সকাল বাদে)
       const nameMap = { sokal: 'সকাল', dopore: 'দুপুর', ratre: 'রাত' };
       const disabledNames = disabledMeals.map(m => nameMap[m]).join(', ');
+      const sokalMissed = disabledMeals.includes('sokal');
+      const msg = sokalMissed
+        ? `⏰ সময়সীমা পেরিয়ে গেছে!\n\n"${disabledNames}" মিলের সময় শেষ। ☀️ সকাল বাধ্যতামূলক — আজকের সকালের রেট বিল থেকে কাটা হবে (খাবার না পেলেও)।\n\nঅন্য বন্ধ মিলগুলো আগামীকাল থেকে চালু করবেন?`
+        : `⏰ সময়সীমা পেরিয়ে গেছে!\n\n"${disabledNames}" মিলে আজকের জন্য নিবন্ধন সম্ভব নয়।\n\nএই মিলগুলো আগামীকাল থেকে চালু করবেন?`;
       showCutoffConfirm(
-        `⏰ সময়সীমা পেরিয়ে গেছে!\n\n"${disabledNames}" মিলে আজকের জন্য নিবন্ধন সম্ভব নয়।\n\nএই মিলগুলো আগামীকাল থেকে চালু করবেন?`,
+        msg,
         () => {
-          // হ্যাঁ → disabled meals প্ল্যানে থাকবে (আগামীকাল থেকে), তাই toggle গুলো আবার select করে রাখা হলো
-          // (এগুলো আগে applyCutoffForDate() এসে uncheck করে দিয়েছিল — সেটা শুধু আজকের জন্য,
-          //  পুরো প্ল্যান থেকে বাদ দেওয়ার জন্য নয়)। আজকের জন্য mealOff হবে submit-এ।
-          window._cutoffMealOffPending = { meals: disabledMeals, date: today };
+          // হ্যাঁ → সকাল বাদে disabled meals প্ল্যানে থাকবে (আগামীকাল থেকে)
+          // শুধু sokal বাদে বাকি disabled meals আজকের জন্য mealOff হবে
+          window._cutoffMealOffPending = offableMeals.length > 0
+            ? { meals: offableMeals, date: today }
+            : null;
           const idMap  = { sokal:'toggleSokal', dopore:'toggleDopore', ratre:'toggleRatre' };
           const chkMap = { sokal:'selSokal',    dopore:'selDopore',    ratre:'selRatre' };
+          // সব disabled meals প্ল্যানে রাখো (toggle গুলো select করো) — sokal সহ
           disabledMeals.forEach(mKey => {
             const toggle = document.getElementById(idMap[mKey]);
             if (toggle) toggle.classList.add('selected');
@@ -3702,19 +3693,19 @@ function wzNext(fromStep) {
           proceedToSummary();
         },
         () => {
-          // না → disabled meals plan থেকে বাদ (uncheck করো)
+          // না → সকাল বাদে disabled meals plan থেকে বাদ (uncheck করো)
           window._cutoffMealOffPending = null;
-          disabledMeals.forEach(mKey => {
+          offableMeals.forEach(mKey => {
             const idMap = { sokal: 'toggleSokal', dopore: 'toggleDopore', ratre: 'toggleRatre' };
             const chkMap = { sokal: 'selSokal', dopore: 'selDopore', ratre: 'selRatre' };
             document.getElementById(idMap[mKey]).classList.remove('selected');
             const chk = document.getElementById(chkMap[mKey]);
             if (chk) chk.checked = false;
           });
-          // পুনরায় যাচাই: এখনো কোনো মিল আছে?
-          const stillHas = ['toggleSokal','toggleDopore','toggleRatre'].some(id =>
-            document.getElementById(id).classList.contains('selected'));
-          if (!stillHas) return showToast('কমপক্ষে একটি মিল নির্বাচন করুন', 'error');
+          // সকাল সবসময় selected থাকবে
+          document.getElementById('toggleSokal').classList.add('selected');
+          document.getElementById('selSokal').checked = true;
+          // পুনরায় যাচাই: সকাল তো আছেই
           calcDailyRate();
           proceedToSummary();
         }
@@ -3764,27 +3755,37 @@ function applyCutoffForDate() {
   const disabled = getTimeCutoffDisabledMeals();
   if (disabled.length === 0) return; // এখনো cutoff হয়নি
 
+  // সকাল সবসময় mandatory — cutoff পার হলেও UI তে enable থাকবে এবং rate কাটবে
+  const nonSokalDisabled = disabled.filter(m => m !== 'sokal');
   const allDisabled = disabled.length === 3;
 
-  disabled.forEach(mKey => {
+  nonSokalDisabled.forEach(mKey => {
     const toggle = document.getElementById(idMap[mKey]);
     if (!toggle) return;
-    // cutoff পার হওয়া মিল disable করো — uncheck করো
+    // cutoff পার হওয়া মিল (সকাল বাদে) disable করো — uncheck করো
     toggle.classList.add('cutoff-disabled');
     toggle.classList.remove('selected');
     const chk = document.getElementById(chkMap[mKey]);
     if (chk) chk.checked = false;
   });
 
+  // সকালের cutoff পার হলেও সকাল selected ও enabled রাখো
+  const sokalToggle = document.getElementById('toggleSokal');
+  const sokalChk = document.getElementById('selSokal');
+  if (sokalToggle) { sokalToggle.classList.add('selected'); sokalToggle.classList.remove('cutoff-disabled'); }
+  if (sokalChk) sokalChk.checked = true;
+
   if (warningEl) {
     if (allDisabled) {
-      warningEl.innerHTML = '⏰ <strong>আজকের সব মিলের সময় শেষ।</strong> আগামীকাল বা পরের তারিখে শুরু করুন — সেগুলো সবসময় খোলা।';
-    } else {
-      const nameMap = { sokal:'সকাল', dopore:'দুপুর', ratre:'রাত' };
-      const names = disabled.map(m => nameMap[m]).join(', ');
-      warningEl.innerHTML = `⏰ <strong>${names}</strong> মিলের সময়সীমা পেরিয়ে গেছে। এই মিলগুলো আজকের জন্য নেওয়া যাবে না।`;
+      // সব মিলের cutoff পার — কিন্তু সকাল mandatory তাই শুধু দুপুর+রাত বন্ধ
+      const names = ['দুপুর', 'রাত'].join(', ');
+      warningEl.innerHTML = `⏰ <strong>${names}</strong> মিলের সময়সীমা পেরিয়ে গেছে। ☀️ সকাল বাধ্যতামূলক — সকালের রেট সবসময় কাটবে।`;
+    } else if (nonSokalDisabled.length > 0) {
+      const nameMap = { dopore:'দুপুর', ratre:'রাত' };
+      const names = nonSokalDisabled.map(m => nameMap[m]).join(', ');
+      warningEl.innerHTML = `⏰ <strong>${names}</strong> মিলের সময়সীমা পেরিয়ে গেছে। ☀️ সকাল বাধ্যতামূলক — সকালের রেট সবসময় কাটবে।`;
     }
-    warningEl.classList.add('show');
+    if (nonSokalDisabled.length > 0 || disabled.includes('sokal')) warningEl.classList.add('show');
   }
 
   calcDailyRate();
@@ -3920,9 +3921,10 @@ function showDiningOnNewModal() {
   // Show rates info
   const rates = getData('milRates', { sokal:25, dopore:35, ratre:25, cooking:5 });
   document.getElementById('mealRateInfo').innerHTML = `
-    <strong>মিল রেট:</strong> সকাল ৳${rates.sokal} | দুপুর ৳${rates.dopore} | রাত ৳${rates.ratre}<br>
+    <strong>মিল রেট:</strong> ☀️ সকাল ৳${rates.sokal} 🔒 | 🌤️ দুপুর ৳${rates.dopore} | 🌙 রাত ৳${rates.ratre}<br>
     <strong>কুকিং চার্জ:</strong> ৳${rates.cooking}/দিন<br>
-    <small style="color:var(--text-muted);">৩ বেলা = ৳${rates.sokal+rates.dopore+rates.ratre}+${rates.cooking} = ৳${rates.sokal+rates.dopore+rates.ratre+rates.cooking}/দিন</small>
+    <small style="color:var(--text-muted);">৩ বেলা = ৳${rates.sokal+rates.dopore+rates.ratre}+${rates.cooking} = ৳${rates.sokal+rates.dopore+rates.ratre+rates.cooking}/দিন | শুধু রাত = ৳${rates.sokal+rates.ratre}+${rates.cooking} | শুধু দুপুর = ৳${rates.sokal+rates.dopore}+${rates.cooking}</small><br>
+    <small style="color:#b45309;">🔒 সকালের মিল বাধ্যতামূলক — সকালের রেট সবসময় কাটবে।</small>
   `;
 
   // Show admin-set dates and populate date picker
@@ -4029,6 +4031,15 @@ function onOffMealToggle(meal, el) {
 
 // সকাল সবসময় selected — দুপুর বা রাত toggle করলেও সকাল থাকবে
 function onMealToggle(checkbox, meal) {
+  // সকাল সবসময় বাধ্যতামূলক — uncheck করা যাবে না
+  if (meal === 'sokal' && !checkbox.checked) {
+    checkbox.checked = true;
+    checkbox.parentElement.classList.add('selected');
+    showToast('☀️ সকালের মিল বাধ্যতামূলক — বন্ধ করা যাবে না', 'info');
+    calcDailyRate();
+    return;
+  }
+
   const toggle = checkbox.parentElement;
   toggle.classList.toggle('selected', checkbox.checked);
 
@@ -4037,18 +4048,10 @@ function onMealToggle(checkbox, meal) {
   const doporeToggle = document.getElementById('toggleDopore');
   const ratreToggle = document.getElementById('toggleRatre');
 
-  // দুপুর বা রাত select করলে সকাল auto-select
+  // দুপুর বা রাত select করলে সকাল auto-select (সর্বদা)
   if (doporeToggle.classList.contains('selected') || ratreToggle.classList.contains('selected')) {
     sokalToggle.classList.add('selected');
     sokalChk.checked = true;
-  }
-
-  // সকাল uncheck করলে দুপুর ও রাত ও uncheck
-  if (meal === 'sokal' && !checkbox.checked) {
-    doporeToggle.classList.remove('selected');
-    ratreToggle.classList.remove('selected');
-    document.getElementById('selDopore').checked = false;
-    document.getElementById('selRatre').checked = false;
   }
 
   calcDailyRate();
@@ -4142,7 +4145,7 @@ function submitDiningOn() {
   const cycleEnd = diningDates.end;
 
   const meals = {
-    sokal: document.getElementById('toggleSokal').classList.contains('selected'),
+    sokal: true, // সকাল সবসময় mandatory
     dopore: document.getElementById('toggleDopore').classList.contains('selected'),
     ratre: document.getElementById('toggleRatre').classList.contains('selected'),
   };
@@ -10166,8 +10169,8 @@ function loadStudentMeals() {
   document.getElementById('studentMealEdit').innerHTML = `
     <div style="background:var(--bg);border-radius:8px;padding:14px;">
       <div class="meal-toggle-row" id="smeRow">
-        <label class="meal-toggle ${s.meals.sokal?'selected':''}" onclick="adminToggleStudentMeal('sokal',this,${id})">
-          <input type="checkbox" ${s.meals.sokal?'checked':''}> ☀️ সকাল (৳${rates.sokal})
+        <label class="meal-toggle selected" style="opacity:0.75;cursor:not-allowed;" title="সকাল বাধ্যতামূলক — পরিবর্তন করা যাবে না">
+          <input type="checkbox" checked disabled> ☀️ সকাল (৳${rates.sokal}) 🔒
         </label>
         <label class="meal-toggle ${s.meals.dopore?'selected':''}" onclick="adminToggleStudentMeal('dopore',this,${id})">
           <input type="checkbox" ${s.meals.dopore?'checked':''}> 🌤️ দুপুর (৳${rates.dopore})
@@ -10176,28 +10179,29 @@ function loadStudentMeals() {
           <input type="checkbox" ${s.meals.ratre?'checked':''}> 🌙 রাত (৳${rates.ratre})
         </label>
       </div>
-      <div style="font-size:12px;color:var(--text-muted);margin-top:8px;">ℹ️ দুপুর বা রাত চালু করলে সকাল অটো চালু হয়ে যাবে (সকাল ছাড়া দুপুর/রাত একা নেওয়া যায় না)।</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:8px;">ℹ️ সকাল বাধ্যতামূলক 🔒 — দুপুর বা রাত চালু করলে সকাল স্বয়ংক্রিয়ভাবে include হয়।</div>
     </div>
   `;
 }
 
-// দুপুর বা রাত অন করলে সকাল অটো অন হবে; সকাল অফ করলে দুপুর/রাতও অফ হয়ে যাবে — রেজিস্ট্রেশন উইজার্ডের নিয়মের সাথে সামঞ্জস্য রাখতে
+// সকাল সবসময় mandatory — শুধু দুপুর/রাত toggle করা যাবে
 function adminToggleStudentMeal(meal, el, id) {
+  if (meal === 'sokal') return; // সকাল locked — কিছু করার নেই
   el.classList.toggle('selected');
   const labels = document.querySelectorAll('#smeRow .meal-toggle');
   const sokalEl = labels[0], doporeEl = labels[1], ratreEl = labels[2];
 
+  // দুপুর বা রাত select করলে সকাল auto-select (সবসময় mandatory)
   if (doporeEl.classList.contains('selected') || ratreEl.classList.contains('selected')) {
     sokalEl.classList.add('selected');
-  }
-  if (meal === 'sokal' && !sokalEl.classList.contains('selected')) {
-    doporeEl.classList.remove('selected');
-    ratreEl.classList.remove('selected');
+  } else {
+    // শুধু সকাল থাকলে সকাল selected-ই থাকবে
+    sokalEl.classList.add('selected');
   }
   // checkbox UI কে classList এর সাথে সিঙ্ক করা
   labels.forEach(l => {
     const cb = l.querySelector('input[type="checkbox"]');
-    if (cb) cb.checked = l.classList.contains('selected');
+    if (cb && !cb.disabled) cb.checked = l.classList.contains('selected');
   });
 
   updateStudentMeal(id);
@@ -10209,11 +10213,11 @@ function updateStudentMeal(id) {
     const s = students.find(x => x.id === id);
     if (!s) return;
     const labels = document.querySelectorAll('#smeRow .meal-toggle');
-    s.meals.sokal = labels[0]?.classList.contains('selected');
+    s.meals.sokal = true; // সকাল সবসময় mandatory
     s.meals.dopore = labels[1]?.classList.contains('selected');
     s.meals.ratre = labels[2]?.classList.contains('selected');
     const rates = getData('milRates', {});
-    const mealCostOnly3 = (s.meals.sokal?rates.sokal:0)+(s.meals.dopore?rates.dopore:0)+(s.meals.ratre?rates.ratre:0);
+    const mealCostOnly3 = (rates.sokal||0)+(s.meals.dopore?rates.dopore:0)+(s.meals.ratre?rates.ratre:0);
     s.dailyRate = mealCostOnly3 > 0 ? mealCostOnly3 + (rates.cooking||5) : 0;
     setData('students', students);
   }, 50);
