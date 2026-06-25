@@ -1952,8 +1952,8 @@ input:checked + .slider:before { transform: translateX(20px); }
               <label class="form-label">কোন মিল?</label>
               <div class="meal-toggle-row">
                 <div class="meal-toggle" id="adminGuestSokal" onclick="this.classList.toggle('selected');adminGuestUpdateCost()">☀️ সকাল</div>
-                <div class="meal-toggle" id="adminGuestDopore" onclick="this.classList.toggle('selected');adminGuestUpdateCost()">🌤️ দুপুর</div>
-                <div class="meal-toggle" id="adminGuestRatre" onclick="this.classList.toggle('selected');adminGuestUpdateCost()">🌙 রাত</div>
+                <div class="meal-toggle" id="adminGuestDopore" onclick="(function(el){el.classList.toggle('selected');var s=document.getElementById('adminGuestSokal');if(s&&(el.classList.contains('selected')||document.getElementById('adminGuestRatre')?.classList.contains('selected')))s.classList.add('selected');adminGuestUpdateCost();})(this)">🌤️ দুপুর</div>
+                <div class="meal-toggle" id="adminGuestRatre" onclick="(function(el){el.classList.toggle('selected');var s=document.getElementById('adminGuestSokal');if(s&&(el.classList.contains('selected')||document.getElementById('adminGuestDopore')?.classList.contains('selected')))s.classList.add('selected');adminGuestUpdateCost();})(this)">🌙 রাত</div>
               </div>
             </div>
             <div id="adminGuestCostPreview" style="background:var(--purple);color:white;border-radius:8px;padding:10px;font-size:13px;text-align:center;margin-bottom:12px;display:none;"></div>
@@ -2974,40 +2974,135 @@ const COOKING_CHARGE_DEFAULT = 5;
 // In-memory cache — loaded from server at startup, synced to server on every write
 const _cache = {};
 let _cacheLoaded = false;
+let _serverAvailable = false; // server আছে কিনা
 
 async function initCache() {
   try {
+    // Health check — MongoDB connected কিনা
+    const hRes = await fetch('/api/health', { signal: AbortSignal.timeout(5000) });
+    const hJson = await hRes.json().catch(() => null);
+    if (!hRes.ok || !hJson?.ok) throw new Error('server-not-ready');
+
+    // সব data MongoDB থেকে load
     const res = await fetch('/api/store');
+    const ct = res.headers.get('content-type') || '';
+    if (!res.ok || !ct.includes('application/json')) throw new Error('no-json');
     const docs = await res.json();
     docs.forEach(d => { _cache[d.key] = d.value; });
+    _serverAvailable = true;
     _cacheLoaded = true;
+    console.log(`✅ MongoDB connected — ${docs.length}টি key লোড হয়েছে`);
   } catch(e) {
-    console.warn('Server unreachable, falling back to localStorage', e);
-    // Fallback: load from localStorage
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      try { _cache[k] = JSON.parse(localStorage.getItem(k)); } catch {}
-    }
+    // Server/MongoDB পাওয়া যাচ্ছে না — UI-তে error দেখাও
+    _serverAvailable = false;
     _cacheLoaded = true;
+    console.error('❌ Server unreachable:', e.message);
+    // পুরো পেজ block করে error দেখাও
+    document.body.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#fef2f2;font-family:'Hind Siliguri',sans-serif;padding:20px;">
+        <div style="background:white;border-radius:16px;padding:32px 28px;max-width:420px;width:100%;text-align:center;box-shadow:0 4px 32px rgba(0,0,0,0.12);border:2px solid #fca5a5;">
+          <div style="font-size:48px;margin-bottom:16px;">❌</div>
+          <div style="font-size:20px;font-weight:700;color:#991b1b;margin-bottom:10px;">সার্ভার সংযোগ ব্যর্থ</div>
+          <div style="font-size:14px;color:#7f1d1d;margin-bottom:8px;">MongoDB বা Server চালু নেই।</div>
+          <div style="font-size:13px;color:#6b7280;margin-bottom:20px;line-height:1.6;">
+            নিশ্চিত করুন:<br>
+            ১. <code style="background:#f3f4f6;padding:1px 5px;border-radius:4px;">node server.js</code> চালু আছে<br>
+            ২. MongoDB connected আছে<br>
+            ৩. <code style="background:#f3f4f6;padding:1px 5px;border-radius:4px;">MONGO_URI</code> সঠিক আছে
+          </div>
+          <button onclick="location.reload()" style="background:#dc2626;color:white;border:none;padding:12px 28px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;">🔄 আবার চেষ্টা করুন</button>
+        </div>
+      </div>`;
   }
 }
 
 function getData(key, def) {
   if (!_cacheLoaded) {
-    // Fallback during init
-    try { return JSON.parse(localStorage.getItem(key)) ?? def; } catch { return def; }
+    // initCache শেষ হওয়ার আগে cache থেকেই দাও
+    return key in _cache ? _cache[key] : def;
   }
   return key in _cache ? _cache[key] : def;
 }
 
 function setData(key, val) {
   _cache[key] = val;
-  localStorage.setItem(key, JSON.stringify(val)); // local fallback
+  // সবসময় MongoDB-তে save
   fetch('/api/store/' + encodeURIComponent(key), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ value: val })
-  }).catch(e => console.warn('Sync error for key', key, e));
+  }).catch(e => console.error('setData error [' + key + ']:', e.message));
+}
+
+// MongoDB থেকে নির্দিষ্ট keys fresh reload করো (অন্য user-এর update পেতে)
+async function refreshKeys(...keys) {
+  try {
+    const res = await fetch('/api/store');
+    const ct = res.headers.get('content-type') || '';
+    if (!res.ok || !ct.includes('application/json')) return;
+    const docs = await res.json();
+    docs.forEach(d => {
+      if (keys.length === 0 || keys.includes(d.key)) {
+        _cache[d.key] = d.value;
+      }
+    });
+  } catch(e) { /* silent */ }
+}
+
+// Page visible হলে important keys refresh করো (অন্য tab/user এর change পেতে)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    refreshKeys('students','payments','mealOffs','guestMeals','bazar',
+                'extraMeals','tempMealOns','milRates','adminDiningDates',
+                'notices','polls','feedbacks','comments','ls_settings')
+      .then(() => {
+        const dashPage  = document.getElementById('page-dashboard');
+        const adminPage = document.getElementById('page-admin');
+        const commPage  = document.getElementById('page-community');
+        if (dashPage  && dashPage.classList.contains('active') && currentStudent) {
+          const students = getData('students', []);
+          const fresh = students.find(s => s.id === currentStudent.id);
+          if (fresh) { currentStudent = fresh; setSessionStudent(fresh); }
+          renderDashboard();
+        }
+        if (adminPage && adminPage.classList.contains('active')) renderAdminDashboard();
+        if (commPage  && commPage.classList.contains('active'))  renderCommunity();
+      });
+  }
+});
+
+// প্রতি ৩০ সেকেন্ডে auto-refresh (multi-user sync)
+setInterval(async () => {
+  if (document.visibilityState !== 'visible') return;
+  await refreshKeys('students','payments','mealOffs','guestMeals','bazar',
+                    'extraMeals','tempMealOns','milRates','adminDiningDates',
+                    'notices','polls','feedbacks','ls_settings');
+  // Active page অনুযায়ী re-render
+  const dashPage  = document.getElementById('page-dashboard');
+  const adminPage = document.getElementById('page-admin');
+  const commPage  = document.getElementById('page-community');
+  if (dashPage && dashPage.classList.contains('active') && currentStudent) {
+    const students = getData('students', []);
+    const fresh = students.find(s => s.id === currentStudent.id);
+    if (fresh) { currentStudent = fresh; setSessionStudent(fresh); }
+    renderDashboard();
+  }
+  if (adminPage && adminPage.classList.contains('active')) renderAdminDashboard();
+  if (commPage  && commPage.classList.contains('active'))  renderCommunity();
+}, 30000);
+
+// Bulk import — store-bulk API ব্যবহার করে (backup restore-এর জন্য)
+async function setDataBulk(items) {
+  // Cache আপডেট
+  items.forEach(({ key, value }) => { _cache[key] = value; });
+  const res = await fetch('/api/store-bulk', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items })
+  });
+  const r = await res.json();
+  if (!r.ok) throw new Error('bulk write failed');
+  return true;
 }
 // ================================================================
 
@@ -3036,17 +3131,7 @@ function saveSettings(patch) {
   setData('ls_settings', updated);
   return updated;
 }
-// Backward-compat: migrate old diningLocked key → settings.mealOffLocked
-(function migrateLock() {
-  const old = localStorage.getItem('diningLocked');
-  if (old !== null) {
-    const settings = getSettings();
-    if (!settings.mealOffLocked && JSON.parse(old) === true) {
-      saveSettings({ mealOffLocked: true });
-    }
-    localStorage.removeItem('diningLocked');
-  }
-})();
+// (diningLocked migration removed — MongoDB-only mode)
 
 // Dynamic credentials (read from settings store each time)
 function getAdminCreds() {
@@ -3095,7 +3180,15 @@ function addAudit(action, details, targetStudentId, targetStudentName) {
   setData('ls_audit', audit);
 }
 
-let currentStudent = getData('currentStudent', null);
+// currentStudent শুধু sessionStorage-এ (MongoDB-তে যাবে না)
+function getSessionStudent() {
+  try { return JSON.parse(sessionStorage.getItem('currentStudent')); } catch { return null; }
+}
+function setSessionStudent(s) {
+  if (s === null) sessionStorage.removeItem('currentStudent');
+  else sessionStorage.setItem('currentStudent', JSON.stringify(s));
+}
+let currentStudent = getSessionStudent();
 let currentAdminSelected = null;
 let onPayMethodSelected = 'cash';
 let payMethodSelected = 'cash';
@@ -3117,20 +3210,26 @@ function getBatchColor(batch) {
 }
 
 // ==================== PAGE ROUTING ====================
-function showPage(pg) {
+async function showPage(pg) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById('page-' + pg).classList.add('active');
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   if (pg === 'community') document.getElementById('navCommunity').classList.add('active');
   if (pg === 'dashboard') {
     document.getElementById('navDashboard').classList.add('active');
+    // Page খোলার আগে fresh data আনো
+    await refreshKeys('students','payments','mealOffs','guestMeals','extraMeals','tempMealOns','milRates','adminDiningDates');
     renderDashboard();
   }
   if (pg === 'admin') {
     document.getElementById('navAdmin').classList.add('active');
+    await refreshKeys('students','payments','mealOffs','guestMeals','bazar','extraMeals','tempMealOns','milRates','adminDiningDates','notices','polls','feedbacks','ls_settings');
     renderAdminDashboard();
   }
-  if (pg === 'community') renderCommunity();
+  if (pg === 'community') {
+    await refreshKeys('notices','polls','menus','students','milRates');
+    renderCommunity();
+  }
 }
 
 // ==================== COMMUNITY ====================
@@ -3880,7 +3979,7 @@ function studentLogin() {
   if (!s) return showToast('নাম বা পাসওয়ার্ড ভুল', 'error');
 
   currentStudent = s;
-  setData('currentStudent', currentStudent);
+  setSessionStudent(currentStudent);
   closeModal('studentLoginModal');
   updateNavForStudent();
   showPage('dashboard');
@@ -4045,7 +4144,7 @@ function submitDiningOn() {
       return showToast('এই নামে ও রুমে ডাইনিং চালু আছে। সঠিক পাসওয়ার্ড দিয়ে লগইন করুন।', 'error');
     }
     currentStudent = existing;
-    setData('currentStudent', currentStudent);
+    setSessionStudent(currentStudent);
     closeModal('diningOnModal');
     updateNavForStudent();
     showPage('dashboard');
@@ -4109,7 +4208,7 @@ function submitDiningOn() {
   }
 
   currentStudent = student;
-  setData('currentStudent', currentStudent);
+  setSessionStudent(currentStudent);
   closeModal('diningOnModal');
   updateNavForStudent();
   showPage('dashboard');
@@ -4136,7 +4235,7 @@ function updateNavForStudent() {
 
 function logout() {
   currentStudent = null;
-  setData('currentStudent', null);
+  setSessionStudent(null);
   updateNavForStudent();
   showPage('community');
   showToast('লগআউট সফল', 'info');
@@ -4306,7 +4405,27 @@ function calcTotalBill(student) {
   const guestMeals = getData('guestMeals', []);
   const guestCost = guestMeals
     .filter(g => g.studentId === student.id && (g.status || 'approved') === 'approved')
-    .reduce((sum, g) => sum + (g.dates || []).filter(gd => gd >= start && gd <= end).length * (g.perDay || 0), 0);
+    .reduce((sum, g) => {
+      // g.total সরাসরি ব্যবহার করি — submit-এর সময় Friday rate ধরেই calculate হয়েছিল
+      // তবে শুধু চক্রের মধ্যে পড়া dates-এর অংশ নেওয়া হচ্ছে
+      const activeDates = (g.dates || []).filter(gd => gd >= start && gd <= end);
+      if (activeDates.length === 0) return sum;
+      if (activeDates.length === (g.dates || []).length) return sum + (g.total || 0);
+      // আংশিক তারিখ — প্রতিটি তারিখ আলাদাভাবে চেক করে cost বের করি
+      const rates2 = getData('milRates', { sokal:25, dopore:35, ratre:25, cooking:5 });
+      const meals2 = g.meals || [];
+      let partialCost = 0;
+      activeDates.forEach(gd => {
+        const isFriday = new Date(gd).getDay() === 5;
+        const r2 = isFriday ? FRIDAY_GUEST_RATES : rates2;
+        let mc = 0;
+        if (meals2.includes('sokal')) mc += r2.sokal;
+        if (meals2.includes('dopore')) mc += r2.dopore;
+        if (meals2.includes('ratre')) mc += r2.ratre;
+        partialCost += mc > 0 ? mc + r2.cooking : 0;
+      });
+      return sum + partialCost;
+    }, 0);
   return totalCost + guestCost;
 }
 
@@ -6168,9 +6287,9 @@ function executeDeleteStudent() {
   setData('feedbacks', feedbacks.filter(f => f.studentId !== id));
 
   // currentStudent logout করুন যদি সেই student লগইন করা থাকে
-  const current = getData('currentStudent', null);
-  if (current && current.id === id) {
-    localStorage.removeItem('currentStudent');
+  if (currentStudent && currentStudent.id === id) {
+    setSessionStudent(null);
+    currentStudent = null;
   }
 
   addAudit('STUDENT_DELETED', `${name} (ID: ${id}) — সম্পূর্ণ ডেটা মুছে ফেলা হয়েছে`, id, name);
@@ -8672,26 +8791,77 @@ function updateGuestMealToggleForDate() {
   updateGuestCost();
 }
 
+// শুক্রবারের গেস্ট মিল রেট (fixed)
+const FRIDAY_GUEST_RATES = { sokal: 15, dopore: 50, ratre: 40, cooking: 5 };
+
+// নির্বাচিত তারিখগুলোর মধ্যে শুক্রবার আছে কিনা চেক করে
+function selectedDatesHasFriday(pickerSelector) {
+  return Array.from(document.querySelectorAll(pickerSelector + ' .date-chip.selected'))
+    .some(el => new Date(el.dataset.date).getDay() === 5);
+}
+
+// দুপুর/রাত select হলে সকাল auto-select (guest মিল)
 function toggleGuestMeal(el) {
+  const id = el.id;
   el.classList.toggle('selected');
+  // দুপুর বা রাত select হলে সকাল mandatory
+  const sokalEl = document.getElementById('guestSokal');
+  const doporeEl = document.getElementById('guestDopore');
+  const ratreEl = document.getElementById('guestRatre');
+  if (sokalEl && !sokalEl.classList.contains('cutoff-disabled')) {
+    const doporeOn = doporeEl?.classList.contains('selected');
+    const ratreOn = ratreEl?.classList.contains('selected');
+    if (doporeOn || ratreOn) {
+      sokalEl.classList.add('selected');
+    }
+  }
   updateGuestCost();
 }
 
 function updateGuestCost() {
   const rates = getData('milRates', { sokal:25, dopore:35, ratre:25, cooking:5 });
-  const dates = document.querySelectorAll('#guestDatePicker .date-chip.selected').length;
-  let mealCost = 0;
-  if (document.getElementById('guestSokal')?.classList.contains('selected')) mealCost += rates.sokal;
-  if (document.getElementById('guestDopore')?.classList.contains('selected')) mealCost += rates.dopore;
-  if (document.getElementById('guestRatre')?.classList.contains('selected')) mealCost += rates.ratre;
-  const cookingCharge = mealCost > 0 ? (rates.cooking || 5) : 0;
-  const perDay = mealCost + cookingCharge;
-  const total = perDay * dates;
+  const selectedDates = Array.from(document.querySelectorAll('#guestDatePicker .date-chip.selected'));
+  const dates = selectedDates.length;
+
+  // শুক্রবার আছে কিনা চেক
+  const hasFriday = selectedDates.some(el => new Date(el.dataset.date).getDay() === 5);
+  const nonFridayDates = selectedDates.filter(el => new Date(el.dataset.date).getDay() !== 5).length;
+  const fridayDates = selectedDates.filter(el => new Date(el.dataset.date).getDay() === 5).length;
+
+  const sokalOn = document.getElementById('guestSokal')?.classList.contains('selected');
+  const doporeOn = document.getElementById('guestDopore')?.classList.contains('selected');
+  const ratreOn = document.getElementById('guestRatre')?.classList.contains('selected');
+
+  // সাধারণ দিনের cost
+  let normalMealCost = 0;
+  if (sokalOn) normalMealCost += rates.sokal;
+  if (doporeOn) normalMealCost += rates.dopore;
+  if (ratreOn) normalMealCost += rates.ratre;
+  const normalCooking = normalMealCost > 0 ? (rates.cooking || 5) : 0;
+  const normalPerDay = normalMealCost + normalCooking;
+
+  // শুক্রবারের cost
+  let fridayMealCost = 0;
+  if (sokalOn) fridayMealCost += FRIDAY_GUEST_RATES.sokal;
+  if (doporeOn) fridayMealCost += FRIDAY_GUEST_RATES.dopore;
+  if (ratreOn) fridayMealCost += FRIDAY_GUEST_RATES.ratre;
+  const fridayCooking = fridayMealCost > 0 ? FRIDAY_GUEST_RATES.cooking : 0;
+  const fridayPerDay = fridayMealCost + fridayCooking;
+
+  const total = (normalPerDay * nonFridayDates) + (fridayPerDay * fridayDates);
   const el = document.getElementById('guestCostPreview');
   if (el) {
-    if (dates > 0 && perDay > 0) {
+    if (dates > 0 && (normalPerDay > 0 || fridayPerDay > 0)) {
       el.style.display = '';
-      el.innerHTML = `${dates} দিন × (৳${mealCost} + কুকিং ৳${cookingCharge})/দিন = <strong>৳${total}</strong><br><small style="opacity:0.85;">আপনার ব্যালেন্স থেকে কাটা হবে</small>`;
+      let breakdownHtml = '';
+      if (nonFridayDates > 0 && normalPerDay > 0) {
+        breakdownHtml += `${nonFridayDates} দিন × ৳${normalPerDay} (সাধারণ)`;
+      }
+      if (fridayDates > 0 && fridayPerDay > 0) {
+        if (breakdownHtml) breakdownHtml += ' + ';
+        breakdownHtml += `${fridayDates} দিন × ৳${fridayPerDay} (শুক্রবার)`;
+      }
+      el.innerHTML = `${breakdownHtml} = <strong>৳${total}</strong>${hasFriday ? '<br><small style="opacity:0.85;">⚠️ শুক্রবার: সকাল ৳১৫ | দুপুর ৳৫০ | রাত ৳৪০ | কুকিং ৳৫</small>' : ''}<br><small style="opacity:0.85;">আপনার ব্যালেন্স থেকে কাটা হবে</small>`;
     } else {
       el.style.display = 'none';
     }
@@ -8734,12 +8904,21 @@ function submitGuestMeal() {
   }
 
   const rates = getData('milRates', { sokal:25, dopore:35, ratre:25, cooking:5 });
-  let perDay = 0;
-  if (meals.includes('sokal')) perDay += rates.sokal;
-  if (meals.includes('dopore')) perDay += rates.dopore;
-  if (meals.includes('ratre')) perDay += rates.ratre;
-  perDay += rates.cooking;
-  const total = perDay * selectedDates.length;
+  // প্রতিটি তারিখের জন্য আলাদা রেট (শুক্রবার vs সাধারণ)
+  let total = 0;
+  let perDay = 0; // শুধু display-এর জন্য (প্রথম তারিখের রেট)
+  selectedDates.forEach((d, i) => {
+    const isFriday = new Date(d).getDay() === 5;
+    const r = isFriday ? FRIDAY_GUEST_RATES : rates;
+    let dayMealCost = 0;
+    if (meals.includes('sokal')) dayMealCost += r.sokal;
+    if (meals.includes('dopore')) dayMealCost += r.dopore;
+    if (meals.includes('ratre')) dayMealCost += r.ratre;
+    const dayCooking = dayMealCost > 0 ? (r.cooking || 5) : 0;
+    const dayTotal = dayMealCost + dayCooking;
+    total += dayTotal;
+    if (i === 0) perDay = dayTotal;
+  });
 
   // গেস্ট মিল এখন সরাসরি যোগ হবে না — অ্যাডমিনের কাছে অনুরোধ যাবে। অ্যাডমিন অনুমোদন করলে
   // তখন ছাত্রের ব্যালেন্স থেকে টাকা কাটা হবে এবং মিলে যোগ হবে।
@@ -8972,19 +9151,47 @@ function adminGuestRenderDatePicker(s) {
 
 function adminGuestUpdateCost() {
   const rates = getData('milRates', { sokal:25, dopore:35, ratre:25, cooking:5 });
-  const dates = document.querySelectorAll('#adminGuestDatePicker .date-chip.selected').length;
-  let mealCost = 0;
-  if (document.getElementById('adminGuestSokal')?.classList.contains('selected')) mealCost += rates.sokal;
-  if (document.getElementById('adminGuestDopore')?.classList.contains('selected')) mealCost += rates.dopore;
-  if (document.getElementById('adminGuestRatre')?.classList.contains('selected')) mealCost += rates.ratre;
-  const cookingCharge = mealCost > 0 ? (rates.cooking || 5) : 0;
-  const perDay = mealCost + cookingCharge;
-  const total = perDay * dates;
+  const selectedDates = Array.from(document.querySelectorAll('#adminGuestDatePicker .date-chip.selected'));
+  const dates = selectedDates.length;
+
+  const sokalOn = document.getElementById('adminGuestSokal')?.classList.contains('selected');
+  const doporeOn = document.getElementById('adminGuestDopore')?.classList.contains('selected');
+  const ratreOn = document.getElementById('adminGuestRatre')?.classList.contains('selected');
+
+  let total = 0;
+  let samplePerDay = 0;
+  let sampleMealCost = 0, sampleCooking = 0;
+  const fridayDates = selectedDates.filter(el => new Date(el.dataset.date).getDay() === 5).length;
+  const nonFridayDates = selectedDates.filter(el => new Date(el.dataset.date).getDay() !== 5).length;
+
+  // সাধারণ দিনের cost
+  let normalMealCost = 0;
+  if (sokalOn) normalMealCost += rates.sokal;
+  if (doporeOn) normalMealCost += rates.dopore;
+  if (ratreOn) normalMealCost += rates.ratre;
+  const normalCooking = normalMealCost > 0 ? (rates.cooking || 5) : 0;
+
+  // শুক্রবারের cost
+  let fridayMealCost = 0;
+  if (sokalOn) fridayMealCost += FRIDAY_GUEST_RATES.sokal;
+  if (doporeOn) fridayMealCost += FRIDAY_GUEST_RATES.dopore;
+  if (ratreOn) fridayMealCost += FRIDAY_GUEST_RATES.ratre;
+  const fridayCooking = fridayMealCost > 0 ? FRIDAY_GUEST_RATES.cooking : 0;
+
+  total = (normalMealCost + normalCooking) * nonFridayDates + (fridayMealCost + fridayCooking) * fridayDates;
+
   const el = document.getElementById('adminGuestCostPreview');
   if (el) {
-    if (dates > 0 && perDay > 0) {
+    if (dates > 0 && (normalMealCost > 0 || fridayMealCost > 0)) {
       el.style.display = '';
-      el.innerHTML = `${dates} দিন × (৳${mealCost} + কুকিং ৳${cookingCharge})/দিন = <strong>৳${total}</strong><br><small style="opacity:0.85;">ছাত্রের ব্যালেন্স থেকে কাটা হবে</small>`;
+      let breakdownHtml = '';
+      if (nonFridayDates > 0 && normalMealCost > 0)
+        breakdownHtml += `${nonFridayDates} দিন × ৳${normalMealCost+normalCooking} (সাধারণ)`;
+      if (fridayDates > 0 && fridayMealCost > 0) {
+        if (breakdownHtml) breakdownHtml += ' + ';
+        breakdownHtml += `${fridayDates} দিন × ৳${fridayMealCost+fridayCooking} (শুক্র)`;
+      }
+      el.innerHTML = `${breakdownHtml} = <strong>৳${total}</strong>${fridayDates>0?'<br><small style="opacity:0.85;">⚠️ শুক্রবার: সকাল ৳১৫ | দুপুর ৳৫০ | রাত ৳৪০</small>':''}<br><small style="opacity:0.85;">ছাত্রের ব্যালেন্স থেকে কাটা হবে</small>`;
     } else {
       el.style.display = 'none';
     }
@@ -9005,12 +9212,20 @@ function adminSubmitGuestMeal() {
   if (meals.length === 0) return showToast('কমপক্ষে একটি মিল নির্বাচন করুন', 'error');
 
   const rates = getData('milRates', { sokal:25, dopore:35, ratre:25, cooking:5 });
-  let mealCost = 0;
-  if (meals.includes('sokal')) mealCost += rates.sokal;
-  if (meals.includes('dopore')) mealCost += rates.dopore;
-  if (meals.includes('ratre')) mealCost += rates.ratre;
-  const perDay = mealCost + (rates.cooking || 5);
-  const total = perDay * selectedDates.length;
+  // প্রতিটি তারিখ আলাদাভাবে শুক্রবার চেক করে cost বের করা
+  let total = 0;
+  let perDay = 0;
+  selectedDates.forEach((d, i) => {
+    const isFriday = new Date(d).getDay() === 5;
+    const r = isFriday ? FRIDAY_GUEST_RATES : rates;
+    let mealCost = 0;
+    if (meals.includes('sokal')) mealCost += r.sokal;
+    if (meals.includes('dopore')) mealCost += r.dopore;
+    if (meals.includes('ratre')) mealCost += r.ratre;
+    const dayCooking = mealCost > 0 ? (r.cooking || 5) : 0;
+    total += mealCost + dayCooking;
+    if (i === 0) perDay = mealCost + dayCooking;
+  });
 
   const students = getData('students', []);
   const s = students.find(x => x.id === studentId);
@@ -10044,11 +10259,13 @@ function importBackup(input) {
   const file = input.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = e => {
+  reader.onload = async e => {
     try {
       const data = JSON.parse(e.target.result);
       const keys = ['students','payments','mealOffs','guestMeals','bazar','extraMeals','tempMealOns','milRates','adminDiningDates','menus','notices','polls','feedbacks','comments','ratings','messages','manualStock'];
-      keys.forEach(k => { if (data[k] !== undefined) setData(k, data[k]); });
+      const items = keys.filter(k => data[k] !== undefined).map(k => ({ key: k, value: data[k] }));
+      showToast('ব্যাকআপ আপলোড হচ্ছে… ⏳', 'info');
+      await setDataBulk(items);
       showToast('ব্যাকআপ পুনরুদ্ধার সফল হয়েছে ✅ — পেজ রিফ্রেশ করুন', 'success');
       setTimeout(() => location.reload(), 1500);
     } catch(err) {
@@ -10532,8 +10749,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   document.body.appendChild(loadingDiv);
 
   await initCache();
-  // Re-read currentStudent from cache after load
-  currentStudent = getData('currentStudent', null);
+  // currentStudent sessionStorage থেকে (MongoDB-তে নেই)
+  currentStudent = getSessionStudent();
 
   loadingDiv.remove();
 
@@ -10654,7 +10871,7 @@ function switchDashPendingTab(tab) {
 })();
 
 // ==================== 50 STUDENT SEED + LOGIC AUDIT ====================
-// এই স্ক্রিপ্ট শুধু একবার চলবে (localStorage-এ flag সেট করে)
+// এই স্ক্রিপ্ট শুধু একবার চলবে (MongoDB-তে flag সেট করে)
 // প্রতিটি ছাত্র তৈরির পর calcDue, balance, meal logic সব verify করা হয়
 (function seed50StudentsAndAudit() {
   if (getData('_seed50done', false)) return; // already seeded
@@ -10985,7 +11202,7 @@ function switchDashPendingTab(tab) {
     .reduce((s, p) => s + (p.netAmount != null ? p.netAmount : p.amount || 0), 0);
 
   // ───────────────────────────────────────────────
-  // 7. Audit result localStorage-এ সেভ করো
+  // 7. Audit result MongoDB-তে সেভ করো
   // ───────────────────────────────────────────────
   setData('_seed50_auditLog', {
     generatedAt: new Date().toISOString(),
