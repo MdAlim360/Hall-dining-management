@@ -3921,6 +3921,26 @@ function onOffMealToggle(meal, el) {
 function onMealToggle(checkbox, meal) {
   const toggle = checkbox.parentElement;
   toggle.classList.toggle('selected', checkbox.checked);
+
+  const sokalToggle = document.getElementById('toggleSokal');
+  const sokalChk = document.getElementById('selSokal');
+  const doporeToggle = document.getElementById('toggleDopore');
+  const ratreToggle = document.getElementById('toggleRatre');
+
+  // দুপুর বা রাত select করলে সকাল auto-select
+  if (doporeToggle.classList.contains('selected') || ratreToggle.classList.contains('selected')) {
+    sokalToggle.classList.add('selected');
+    sokalChk.checked = true;
+  }
+
+  // সকাল uncheck করলে দুপুর ও রাত ও uncheck
+  if (meal === 'sokal' && !checkbox.checked) {
+    doporeToggle.classList.remove('selected');
+    ratreToggle.classList.remove('selected');
+    document.getElementById('selDopore').checked = false;
+    document.getElementById('selRatre').checked = false;
+  }
+
   calcDailyRate();
 }
 
