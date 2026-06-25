@@ -3686,8 +3686,19 @@ function wzNext(fromStep) {
       showCutoffConfirm(
         `⏰ সময়সীমা পেরিয়ে গেছে!\n\n"${disabledNames}" মিলে আজকের জন্য নিবন্ধন সম্ভব নয়।\n\nএই মিলগুলো আগামীকাল থেকে চালু করবেন?`,
         () => {
-          // হ্যাঁ → disabled meals plan-এ থাকবে (check করা থাকবে), আজকের জন্য mealOff হবে submit-এ
+          // হ্যাঁ → disabled meals প্ল্যানে থাকবে (আগামীকাল থেকে), তাই toggle গুলো আবার select করে রাখা হলো
+          // (এগুলো আগে applyCutoffForDate() এসে uncheck করে দিয়েছিল — সেটা শুধু আজকের জন্য,
+          //  পুরো প্ল্যান থেকে বাদ দেওয়ার জন্য নয়)। আজকের জন্য mealOff হবে submit-এ।
           window._cutoffMealOffPending = { meals: disabledMeals, date: today };
+          const idMap  = { sokal:'toggleSokal', dopore:'toggleDopore', ratre:'toggleRatre' };
+          const chkMap = { sokal:'selSokal',    dopore:'selDopore',    ratre:'selRatre' };
+          disabledMeals.forEach(mKey => {
+            const toggle = document.getElementById(idMap[mKey]);
+            if (toggle) toggle.classList.add('selected');
+            const chk = document.getElementById(chkMap[mKey]);
+            if (chk) chk.checked = true;
+          });
+          calcDailyRate();
           proceedToSummary();
         },
         () => {
